@@ -4,15 +4,26 @@ import random
 from time import sleep
 from machine import Pin
 import sys
+import dht
 
 # CONFIGURA TU RED WIFI
-ssid = 'raze'      # <-- cámbialo
-password = 'armandocode'     # <-- cámbialo
+ssid = 'raze'            # <-- cámbialo si hace falta
+password = 'armandocode' # <-- cámbialo si hace falta
 
-# LED integrado (normalmente GPIO 2)
-led = Pin(2, Pin.OUT)
+# PINS - ajusta según tu conexión física
+led = Pin(2, Pin.OUT)      # LED interno del ESP32
+led_1 = Pin(14, Pin.OUT)   # LED Azul (por ejemplo)
+led_2 = Pin(12, Pin.OUT)   # LED Rojo (por ejemplo)
+led_3 = Pin(13, Pin.OUT)   # LED Verde (por ejemplo)
+buzzer = Pin(27, Pin.OUT)  # Buzzer
 
-def webpage(state, temperature, random_value):
+# Sensor DHT (DHT22 o DHT11 según el que uses)
+dht_pin = Pin(4)
+sensor = dht.DHT22(dht_pin)  # Cambia a DHT11 si usas ese modelo
+
+def webpage(state_0, state_1, state_2, state_3, state_buzzer,
+            temp_internal, temp_ext, hum_ext, delta_temp, random_value):
+    # HTML dinámico
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -24,9 +35,9 @@ def webpage(state, temperature, random_value):
             h1 {{ color: #007bff; }}
             .button {{
                 display: inline-block;
-                width: 200px;
+                width: 180px;
                 padding: 10px;
-                margin: 10px;
+                margin: 6px;
                 border-radius: 5px;
                 text-decoration: none;
                 color: white;
@@ -34,27 +45,76 @@ def webpage(state, temperature, random_value):
             .on {{ background-color: #4CAF50; }}
             .off {{ background-color: #f44336; }}
             .rand {{ background-color: #c0392b; }}
+            .info {{ background-color: #2d3436; padding: 10px; color: white; display: inline-block; border-radius: 6px; }}
+            .section {{ margin: 18px 0; }}
         </style>
     </head>
     <body>
-        <h1>Control de LED</h1>
-        <a class="button on" href="/lighton?">Encender luz LED</a>
-        <a class="button off" href="/lightoff?">Apagar luz LED</a>
-        <p>El LED esta: <strong>{state}</strong></p>
-        
-        <h2>Obtener nuevo valor aleatorio</h2>
-        <a class="button rand" href="/random?">Obtener aleatorio</a>
-        <p>Valor obtenido: <strong>{random_value}</strong></p>
+        <h1>Control de LEDs y Sensor</h1>
 
-        <h2>Resumen final</h2>
-        <p>El LED esta: <strong>{state}</strong></p>
-        <p>La Temperatura es: <strong>{temperature:.2f}</strong> °C</p>
-        <p>Valor obtenido: <strong>{random_value}</strong></p>
+        <div class="section">
+            <h2>Control global</h2>
+            <a class="button on" href="/allon?">Encender todos</a>
+            <a class="button off" href="/alloff?">Apagar todos</a>
+        </div>
+
+        <div class="section">
+            <h2>LED interno</h2>
+            <a class="button on" href="/lighton_0?">Encender</a>
+            <a class="button off" href="/lightoff_0?">Apagar</a>
+            <p>Estado: <strong>{state_0}</strong></p>
+        </div>
+
+        <div class="section">
+            <h2>LED 1 (Azul)</h2>
+            <a class="button on" href="/lighton_1?">Encender</a>
+            <a class="button off" href="/lightoff_1?">Apagar</a>
+            <p>Estado: <strong>{state_1}</strong></p>
+        </div>
+
+        <div class="section">
+            <h2>LED 2 (Rojo)</h2>
+            <a class="button on" href="/lighton_2?">Encender</a>
+            <a class="button off" href="/lightoff_2?">Apagar</a>
+            <p>Estado: <strong>{state_2}</strong></p>
+        </div>
+
+        <div class="section">
+            <h2>LED 3 (Verde)</h2>
+            <a class="button on" href="/lighton_3?">Encender</a>
+            <a class="button off" href="/lightoff_3?">Apagar</a>
+            <p>Estado: <strong>{state_3}</strong></p>
+        </div>
+
+        <div class="section">
+            <h2>Buzzer</h2>
+            <a class="button on" href="/buzzeron?">Encender Buzzer</a>
+            <a class="button off" href="/buzzeroff?">Apagar Buzzer</a>
+            <p>Estado: <strong>{state_buzzer}</strong></p>
+        </div>
+
+        <div class="section">
+            <h2>Sensor (DHT)</h2>
+            <div class="info">
+                <p>Temp interna (simulada): <strong>{temp_internal:.2f} °C</strong></p>
+                <p>Temp externa (sensor): <strong>{temp_ext if temp_ext is not None else 'N/A'}</strong></p>
+                <p>Humedad externa: <strong>{hum_ext if hum_ext is not None else 'N/A'}</strong></p>
+                <p>Diferencia: <strong>{delta_temp if delta_temp is not None else 'N/A'}</strong> °C</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Valor aleatorio</h2>
+            <a class="button rand" href="/random?">Generar aleatorio</a>
+            <p>Valor: <strong>{random_value}</strong></p>
+        </div>
+
+        <hr>
+        <p style="font-size:smaller;color:gray;">ESP32 - MicroPython</p>
     </body>
     </html>
     """
     return html
-
 
 def connect():
     wlan = network.WLAN(network.STA_IF)
@@ -69,13 +129,13 @@ def connect():
         sleep(1)
 
     if wlan.isconnected():
+        ip = wlan.ifconfig()[0]
         print('\nConectado a WiFi')
-        print('IP:', wlan.ifconfig()[0])
-        return wlan.ifconfig()[0]
+        print('IP:', ip)
+        return ip
     else:
         print('\nError: no se pudo conectar')
         sys.exit()
-
 
 def open_socket(ip):
     address = (ip, 80)
@@ -85,34 +145,98 @@ def open_socket(ip):
     print("Servidor listo en:", ip)
     return connection
 
-
 def serve(connection):
-    state = 'OFF'
+    # Estados iniciales
+    state_0 = 'OFF'
+    state_1 = 'OFF'
+    state_2 = 'OFF'
+    state_3 = 'OFF'
+    state_buzzer = 'OFF'
+
+    # Inicializa salidas
     led.value(0)
+    led_1.value(0)
+    led_2.value(0)
+    led_3.value(0)
+    buzzer.value(0)
+
     random_value = 0
-    temperature = random.uniform(25.0, 35.0)  # simula temperatura
+    temp_internal = random.uniform(25.0, 35.0)  # temperatura interna simulada
 
     while True:
         client, addr = connection.accept()
         print('Cliente conectado desde', addr)
-        request = client.recv(1024)
-        request = str(request)
+        try:
+            request = client.recv(2048)
+            request = str(request)
+            print('Solicitud:', request.split('\\r\\n')[0])
+        except Exception as e:
+            print('Error leyendo la solicitud:', e)
+            client.close()
+            continue
 
-        if '/lighton?' in request:
-            led.value(1)
-            state = 'ON'
-        elif '/lightoff?' in request:
-            led.value(0)
-            state = 'OFF'
+        # RUTAS - manejo de acciones
+        if '/lighton_0?' in request:
+            led.value(1); state_0 = 'ON'
+        elif '/lightoff_0?' in request:
+            led.value(0); state_0 = 'OFF'
+
+        elif '/lighton_1?' in request:
+            led_1.value(1); state_1 = 'ON'
+        elif '/lightoff_1?' in request:
+            led_1.value(0); state_1 = 'OFF'
+
+        elif '/lighton_2?' in request:
+            led_2.value(1); state_2 = 'ON'
+        elif '/lightoff_2?' in request:
+            led_2.value(0); state_2 = 'OFF'
+
+        elif '/lighton_3?' in request:
+            led_3.value(1); state_3 = 'ON'
+        elif '/lightoff_3?' in request:
+            led_3.value(0); state_3 = 'OFF'
+
+        elif '/allon?' in request:
+            led.value(1); led_1.value(1); led_2.value(1); led_3.value(1)
+            state_0 = state_1 = state_2 = state_3 = 'ON'
+        elif '/alloff?' in request:
+            led.value(0); led_1.value(0); led_2.value(0); led_3.value(0)
+            state_0 = state_1 = state_2 = state_3 = 'OFF'
+
+        elif '/buzzeron?' in request:
+            buzzer.value(1); state_buzzer = 'ON'
+        elif '/buzzeroff?' in request:
+            buzzer.value(0); state_buzzer = 'OFF'
+
         elif '/random?' in request:
             random_value = random.randint(0, 100)
-            temperature = random.uniform(25.0, 35.0)
+            temp_internal = random.uniform(25.0, 35.0)
 
-        html = webpage(state, temperature, random_value)
-        client.send('HTTP/1.0 200 OK\r\nContent-type: text/html\r\n\r\n')
-        client.send(html)
-        client.close()
+        # Lectura del sensor DHT (manejo de errores)
+        temp_ext = None
+        hum_ext = None
+        delta_temp = None
+        try:
+            sensor.measure()
+            temp_ext = sensor.temperature()
+            hum_ext = sensor.humidity()
+            # calcular diferencia si tenemos temp interna y externa
+            if temp_ext is not None:
+                delta_temp = round(abs(temp_internal - float(temp_ext)), 2)
+        except Exception as e:
+            print('Error leyendo DHT:', e)
+            # deja temp_ext/hum_ext como None para mostrar N/A en la web
 
+        # Generar y enviar la respuesta
+        try:
+            html = webpage(state_0, state_1, state_2, state_3, state_buzzer,
+                           temp_internal, temp_ext, hum_ext, delta_temp, random_value)
+            client.send('HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n'.encode('utf-8'))
+            client.send(html.encode('utf-8'))
+        except Exception as e:
+            print('Error enviando respuesta:', e)
+        finally:
+            client.close()
 
 try:
     ip = connect()
