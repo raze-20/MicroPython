@@ -7,8 +7,8 @@ from machine import Pin
 # -----------------------------------
 # WIFI
 # -----------------------------------
-ssid = "raze"
-password = "armandocode"
+ssid = "..."
+password = "..."
 
 station = network.WLAN(network.STA_IF)
 station.active(True)
