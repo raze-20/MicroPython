@@ -6,8 +6,8 @@ from machine import Pin, ADC, PWM
 import sys
 
 # CONFIGURA TU RED WIFI
-ssid = "raze"
-password = "armandocode"
+ssid = "..."
+password = "..."
 
 # LEDS
 led_internal = Pin(2, Pin.OUT)
