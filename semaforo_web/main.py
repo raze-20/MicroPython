@@ -2,203 +2,186 @@ import network
 import socket
 import time
 import random
-from machine import Pin, PWM
+from machine import Pin
 
+# -----------------------------------
 # WIFI
+# -----------------------------------
 ssid = "raze"
 password = "armandocode"
 
-# LEDs físicos
-led_red = Pin(12, Pin.OUT)
-led_yellow = Pin(14, Pin.OUT)
-led_green = Pin(13, Pin.OUT)
+station = network.WLAN(network.STA_IF)
+station.active(True)
+station.connect(ssid, password)
 
-# Peatones
-led_walk = Pin(25, Pin.OUT)
-led_stop = Pin(26, Pin.OUT)
+while not station.isconnected():
+    time.sleep(0.2)
 
-# Buzzer
-buzzer = PWM(Pin(27))
-buzzer.duty(0)
+print("Conectado:", station.ifconfig())
 
-# Estado
-state = "red"
-timer = 10
+# -----------------------------------
+# SEMAFORO FISICO
+# -----------------------------------
+red_led = Pin(12, Pin.OUT)
+yellow_led = Pin(13, Pin.OUT)
+green_led = Pin(14, Pin.OUT)
 
-# Dashboard suave
-last_temp = 25
-last_hum = 50
-last_update_env = time.ticks_ms()
+traffic_state = 0
+last_change = time.ticks_ms()
 
-def smooth_value(current, target_range=2):
-    return current + random.randint(-target_range, target_range)
+# -----------------------------------
+# SENSOR SIMULADO
+# -----------------------------------
+temperature = 0
+humidity = 0
 
-def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(ssid, password)
-    while not wlan.isconnected():
-        time.sleep(0.3)
-    print("Conectado:", wlan.ifconfig())
+def update_sensors():
+    global temperature, humidity
+    temperature = random.uniform(20, 30)
+    humidity = random.uniform(40, 60)
 
-connect_wifi()
+# -----------------------------------
+# SEMAFORO AUTOMATICO
+# -----------------------------------
+def update_traffic():
+    global traffic_state, last_change
+    now = time.ticks_ms()
 
-# HTML nuevo estilo “full page semáforo”
-html = """
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Semáforo ESP32</title>
-<style>
-body {
-    font-family: Arial;
-    text-align: center;
-    margin: 0;
-    padding: 0;
-    transition: background 0.5s;
-}
+    if time.ticks_diff(now, last_change) > 3000:
+        traffic_state = (traffic_state + 1) % 3
+        last_change = now
 
-.icon {
-    font-size: 150px;
-    margin-top: 40px;
-}
+    red_led.value(1 if traffic_state == 0 else 0)
+    yellow_led.value(1 if traffic_state == 1 else 0)
+    green_led.value(1 if traffic_state == 2 else 0)
 
-.timer {
-    font-size: 120px;
-    font-weight: bold;
-    margin-top: -20px;
-}
+# -----------------------------------
+# PAGINA
+# -----------------------------------
+def webpage():
+    html = f"""
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="2">
 
-.dashboard {
-    background: white;
-    padding: 15px;
-    width: 250px;
-    margin: 30px auto;
-    border-radius: 10px;
-    box-shadow: 0 0 15px #aaa;
-    font-size: 18px;
-}
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            background: #1d1d1f;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: #f2f2f7;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
 
-</style>
-<script>
-function update() {
-    fetch('/state').then(r => r.json()).then(data => {
+        .card {{
+            margin-top: 40px;
+            width: 300px;
+            background: #2c2c2e;
+            border-radius: 28px;
+            padding: 25px 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+        }}
 
-        // Fondo según el estado
-        if(data.state == "red")   document.body.style.background = "#ff8a8a";
-        if(data.state == "yellow") document.body.style.background = "#ffe97a";
-        if(data.state == "green") document.body.style.background = "#7aff8a";
+        .traffic {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 22px;
+            padding: 25px 20px;
+            border-radius: 24px;
+            background: #3a3a3c;
+            box-shadow: inset 0 0 25px rgba(0,0,0,0.45);
+        }}
 
-        // Ícono
-        document.getElementById("icon").innerText =
-            data.state == "green" ? "🚶" : "🚗";
+        .light {{
+            width: 75px;
+            height: 75px;
+            border-radius: 50%;
+            background: #555;
+            transition: 0.3s;
+            box-shadow: 0 0 15px rgba(0,0,0,0.6);
+        }}
 
-        // Timer gigante
-        document.getElementById("timer").innerText = data.timer;
+        #red {{
+            background: {"#ff453a" if traffic_state == 0 else "#3a3a3c"};
+            box-shadow: {"0 0 25px #ff453a88" if traffic_state == 0 else "none"};
+        }}
 
-        // Dashboard
-        document.getElementById("temp").innerText = data.temp;
-        document.getElementById("hum").innerText = data.hum;
+        #yellow {{
+            background: {"#ffd60a" if traffic_state == 1 else "#3a3a3c"};
+            box-shadow: {"0 0 25px #ffd60a88" if traffic_state == 1 else "none"};
+        }}
 
-        // Parpadeo último segundo
-        if(data.timer == 1){
-            document.body.style.opacity =
-                (document.body.style.opacity == "0.5" ? "1" : "0.5");
-        } else {
-            document.body.style.opacity = "1";
-        }
-    });
-}
-setInterval(update, 500);
-</script>
-</head>
+        #green {{
+            background: {"#32d74b" if traffic_state == 2 else "#3a3a3c"};
+            box-shadow: {"0 0 25px #32d74b88" if traffic_state == 2 else "none"};
+        }}
 
-<body>
+        .data {{
+            margin-top: 30px;
+            text-align: center;
+            font-size: 20px;
+            font-weight: 300;
+            letter-spacing: 0.5px;
+        }}
 
-<div id="icon" class="icon">🚗</div>
-<div id="timer" class="timer">0</div>
+        .value {{
+            font-size: 26px;
+            font-weight: 600;
+            margin-top: 6px;
+        }}
+    </style>
 
-<div class="dashboard">
-    <h3>Información</h3>
-    Temp: <span id="temp">0</span>°C<br>
-    Humedad: <span id="hum">0</span>%
-</div>
+    </head>
+    <body>
+        <div class="card">
+            <div class="traffic">
+                <div class="light" id="red"></div>
+                <div class="light" id="yellow"></div>
+                <div class="light" id="green"></div>
+            </div>
 
-</body>
-</html>
-"""
+            <div class="data">
+                <p>Temperatura</p>
+                <div class="value">{temperature:.1f} °C</div>
 
-# Servidor
+                <p style="margin-top:20px;">Humedad</p>
+                <div class="value">{humidity:.1f} %</div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+# -----------------------------------
+# SERVIDOR WEB
+# -----------------------------------
 addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
 s = socket.socket()
 s.bind(addr)
 s.listen(5)
-print("Servidor listo")
+print("Servidor listo en:", addr)
 
-# Actualización de LEDs físicos
-def update_lights():
-    global state
-    led_red.value(state == "red")
-    led_yellow.value(state == "yellow")
-    led_green.value(state == "green")
-
-    led_walk.value(state == "green")
-    led_stop.value(state != "green")
-
-    if state == "red":
-        buzzer.freq(900)
-        buzzer.duty(200)
-    else:
-        buzzer.duty(0)
-
-# Ciclos de tiempo
-last_change = time.ticks_ms()
-
+# -----------------------------------
+# LOOP
+# -----------------------------------
 while True:
+    update_traffic()
+    update_sensors()
 
-    now = time.ticks_ms()
-
-    # Cambio de semáforo
-    if time.ticks_diff(now, last_change) >= 1000:
-        timer -= 1
-
-        if timer <= 0:
-            if state == "red":
-                state = "green"
-                timer = 8
-            elif state == "green":
-                state = "yellow"
-                timer = 3
-            elif state == "yellow":
-                state = "red"
-                timer = 10
-
-        update_lights()
-        last_change = now
-
-    # Dashboard cada 2 segundos
-    if time.ticks_diff(now, last_update_env) >= 2000:
-        last_temp = smooth_value(last_temp, target_range=1)
-        last_hum = smooth_value(last_hum, target_range=1)
-        last_update_env = now
-
-    # Servidor web
     try:
-        cl, addr = s.accept()
-        req = cl.recv(1024).decode()
-
-        if "GET /state" in req:
-            response = (
-                '{"state":"%s","timer":%d,"temp":%d,"hum":%d}'
-                % (state, timer, last_temp, last_hum)
-            )
-            cl.send("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n")
-            cl.send(response)
-        else:
-            cl.send("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n")
-            cl.send(html)
-
-        cl.close()
+        client, addr = s.accept()
+        request = client.recv(1024)
+        response = webpage()
+        client.send("HTTP/1.1 200 OK\r\nContent-type: text/html\r\n\r\n")
+        client.send(response)
+        client.close()
     except:
         pass
+
+    time.sleep(0.1)
